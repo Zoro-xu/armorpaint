@@ -3,6 +3,11 @@ package arm.util;
 import kha.Image;
 import kha.Font;
 import kha.graphics4.TextureFormat;
+import kha.graphics4.VertexBuffer;
+import kha.graphics4.IndexBuffer;
+import kha.graphics4.Usage;
+import kha.graphics4.VertexStructure;
+import kha.graphics4.VertexData;
 import iron.Scene;
 import iron.RenderPath;
 import iron.object.MeshObject;
@@ -11,6 +16,7 @@ import iron.math.Vec4;
 import iron.data.MaterialData;
 import iron.data.ShaderData;
 import arm.ui.UIHeader;
+import arm.ui.UINodes;
 import arm.render.RenderPathPreview;
 import arm.render.RenderPathPaint;
 import arm.render.RenderPathDeferred;
@@ -22,6 +28,8 @@ class RenderUtil {
 
 	public static inline var matPreviewSize = 256;
 	public static inline var decalPreviewSize = 512;
+	static var screenAligned3VB: VertexBuffer = null;
+	static var screenAligned3IB: IndexBuffer = null;
 
 	public static function makeMaterialPreview() {
 		Context.materialPreview = true;
@@ -404,5 +412,62 @@ class RenderUtil {
 		Context.brushBlendDirty = true;
 
 		if (current != null) current.begin(false);
+	}
+
+	static function createScreenAligned3Data() {
+		// Over-sized triangle
+		var data = [-1.0, -1.0, 0.0, 3.0, -1.0, 0.0, -1.0, 3.0, 0.0];
+		var indices = [0, 1, 2];
+
+		// Mandatory vertex data names and sizes
+		var structure = new VertexStructure();
+		structure.add("pos", VertexData.Float3);
+		screenAligned3VB = new VertexBuffer(Std.int(data.length / Std.int(structure.byteSize() / 4)), structure, Usage.StaticUsage);
+		var vertices = screenAligned3VB.lock();
+		for (i in 0...vertices.length) vertices.set(i, data[i]);
+		screenAligned3VB.unlock();
+
+		screenAligned3IB = new IndexBuffer(indices.length, Usage.StaticUsage);
+		var id = screenAligned3IB.lock();
+		for (i in 0...id.length) id[i] = indices[i];
+		screenAligned3IB.unlock();
+	}
+
+	public static function makeNodePreview() {
+		var nodes = Context.material.nodes;
+		if (nodes.nodesSelected.length == 0) return;
+
+		var node = nodes.nodesSelected[0];
+		if (node.type == "TEX_IMAGE" ||
+			node.type == "LAYER" ||
+			node.type == "LAYER_MASK" ||
+			node.type == "MATERIAL" ||
+			node.type == "OUTPUT_MATERIAL_PBR") return;
+
+		if (Context.material.canvas.nodes.indexOf(node) == -1) return;
+
+		if (UINodes.inst.nodePreview == null) {
+			UINodes.inst.nodePreview = kha.Image.createRenderTarget(matPreviewSize, matPreviewSize);
+		}
+
+		Context.nodePreviewDirty = false;
+		UINodes.inst.hwnd.redraws = 2;
+
+		var scon = MakeMaterial.parseNodePreviewMaterial();
+		if (scon == null) return;
+
+		var g4 = UINodes.inst.nodePreview.g4;
+		if (screenAligned3VB == null) {
+			createScreenAligned3Data();
+		}
+
+		g4.begin();
+		g4.setPipeline(scon.pipeState);
+		iron.object.Uniforms.setContextConstants(g4, scon, [""]);
+		iron.object.Uniforms.setObjectConstants(g4, scon, Context.paintObject);
+		g4.setVertexBuffer(screenAligned3VB);
+		g4.setIndexBuffer(screenAligned3IB);
+		g4.drawIndexedVertices();
+		g4.end();
 	}
 }
